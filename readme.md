@@ -181,4 +181,13 @@ sudo docker container ls -a
 
 ### Lecture 22 - Whats going on in Containers
 
-* 
+* we can use various commands to look inside a container
+* `docker container top` = process list in teh container
+* `docker container inspect` = details of one container config
+* `docker container stats` = performance stats for all containers
+* we create two containers to see it in practice
+
+```
+sudo docker container run -d --name nginx nginx
+sudo docker run -d --name mysql -e MYSQL_RANDOM_ROOT_PASSWORD=true mysql
+```
