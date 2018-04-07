@@ -449,3 +449,101 @@ CMD ["/sbin/tini","--","node","./bin/www"] (no spaces when using string array)
 ```
 
 * i run it with `sudo docker container run --rm -p 80:3000 --name test achliopa/node-app`
+
+## Section 4 - Container Lifetime & Persistent Data: Volumes,Volumes,Volumes
+
+### Lecture 41 - Container Lifetime & Persistent data
+
+* [immutable infra](https://www.oreilly.com/ideas/an-introduction-to-immutable-infrastructure)
+* [12 factor app](https://12factor.net/)
+* [12 fractured apps](https://medium.com/@kelseyhightower/12-fractured-apps-1080c73d481c)
+* define the problem of persistent data, key concepts with containers: immutable, ephemeral. learning and using data volumes, learn and use build mounts, assignemeents
+* containers are *usually* immutable(unchangable) and ephemeral
+* *immutable infrastructure*: only re-deploy containers, never change
+* what about databases or unique data generated?
+* docker gives feats to ensure *separation of concerns* aka storer data in different loacation than binaries
+* when we stop a container data are not lost. when we remove it data it contains get lost.
+* two ways to solve persistent data problem: Volumes and Build Mounts
+* Volumes: make special location outside the container UFS(union filesystem)
+* Build Mount: link container path to host path
+
+### Lecture 42 - Peristent Data: Data Volumes
+
+* we use them adding the VOLUME command in Dockerfile e.g `VOLUME /usr/lib/mysql`. it tells docker upon starting a container to create volume and attach it to the container at the specified path. whatever we put there will outlive the container untill we manually delete the volume
+* `sudo docker volume prune` cleansup unused volumes
+* we pull mysql to cache
+* we inspect the image to see its config file, we see a spec for volume data similar to Dockerfile commnd
+
+```
+ "Volumes": {
+                "/var/lib/mysql": {}
+            },
+```
+
+* we start a container from the image `sudo docker run -d --name mysql -e MYSQL_ALLOW_EMPTY_PASSWOR=True mysql`
+
+* we inspect the container to see that a mount entry is added to the metadata
+
+```
+"Mounts": [
+            {
+                "Type": "volume",
+                "Name": "ae73a6ede4bb9138d2cae53fd8a4f12c6156e43348ed189f7cdeda7310683f5a",
+                "Source": "/var/lib/docker/volumes/ae73a6ede4bb9138d2cae53fd8a4f12c6156e43348ed189f7cdeda7310683f5a/_data",
+                "Destination": "/var/lib/mysql",
+                "Driver": "local",
+                "Mode": "",
+                "RW": true,
+                "Propagation": ""
+            }
+        ],
+
+```
+
+* what mounts shows is the container getting its own location on the host to store volume data and in the background it is mounted at the location in the container specified by the VOLUME commnd in dockerfile
+
+* we can list the volumes in the host with `sudo docker volume ls`
+* we can inspect a volume with `sudo docker volume inspect <volumename>`
+* in linux host we can go to mountpoint and see the volume data
+* we see it is difficult from volume to find the container it belongs to. only from container metadata we can find the volume
+* volumes outlive executables
+* named volumes are a way to connect semanticaly containers and volumes so we know what to delete. this is done with the -v <volumename>:<VOLUME path> e.g `sudo docker run -d --name mysql2 -e MYSQL_ALLOW_EMPTY_PASSWORD=True -v mysql-db:/var/lib/mysql mysql` this assigns a name to the volume. this friendly name is easier to maintain and appears in container metadita with inspoect in mount section
+* with `sudo docker volume create` we can create a volume ahead of time
+
+### Lecture 43 Persistent Data:Bind Mounting
+
+* bind mounting: maps a host file or directory to a container file or directory
+* we have two locations pointing to the same file
+* skips UFS, host files overwrite ones in container
+* it is not included in the  Dockerfile, it is added in container run `... run -v /host/path:/path/container`
+* it is useful in development environments when our container interacts with frequently changed files on the host
+* to show it in action we emulatea copy and a working deirectory set in Dockerfile (sample-2) witha dynamica ssociation to the current dir with bind mounting `sudo docker container run -d --name nginx -p 80:80 -v $(pwd):/usr/share/nginx/html nginx` 
+* in the current dir we have and index,html file so we expect to see it rendered in browser. sucess. we change the file on host refresh and see the change
+* if we enter the container and run terminal and go to the mapped dir we see the files . if we add on host files we see them added in container
+
+### Lecture 44 - Assignment: Database Upgrades with Named Volumes
+
+* database updates with containers
+* best practice in docker is replace container to a lter version
+* we create apostgres container with named volume psql-data using version 9.6.1. consult docker hub docs on VOLUME
+* check logs to see that db has started volume is there, stop container
+* createa new postgres cont with same named volume using 9.6.2
+* check logs to validate.
+* this works only with patch versions. SQL DBs need manual commands to update to major.minor versions. db limitation
+
+```
+ sudo docker container run -d --name postgres -v psql-data:/var/lib/postgresql/data postgres:9.6.1
+ sudo docker container logs -f postgres
+ sudo docker container stop postgres
+ sudo docker container run -d --name postgres2 -v psql-data:/var/lib/postgresql/data postgres:9.6.2
+ sudo docker container logs -f postgres2
+  sudo docker container stop postgres2
+sudo docker container rm -f postgres postgres2
+
+### Lecture 46 - Assignemnt: Edit Code Running in Container with Bind Mounts
+
+* [jekyll](https://jekyllrb.com/)
+* use jekyll static site generator to start a local web server
+* this bridges the gap  of local file acces and running in containers
+* tutor has a ready image for us, we run it with `docker contianer run -p 80:4000 -v $(pwd):/site bretfisher/jekyll-serve`
+
