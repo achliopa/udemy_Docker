@@ -539,6 +539,7 @@ CMD ["/sbin/tini","--","node","./bin/www"] (no spaces when using string array)
  sudo docker container logs -f postgres2
   sudo docker container stop postgres2
 sudo docker container rm -f postgres postgres2
+```
 
 ### Lecture 46 - Assignemnt: Edit Code Running in Container with Bind Mounts
 
