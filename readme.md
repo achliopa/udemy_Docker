@@ -199,6 +199,7 @@ sudo docker run -d --name mysql -e MYSQL_RANDOM_ROOT_PASSWORD=true mysql
 
 ### Lecture 23 - Getting a Shell Inside the Container
 
+* [package management](https://www.digitalocean.com/community/tutorials/package-management-basics-apt-yum-dnf-pkg)
 * to start a container interactively `docker container run -it`
 * to enter a running container and launch a second process (additional command inside) we can also use `docker container exec -it`
 * -t gives a pseudoterminal , -i keep session open to receive input
@@ -219,6 +220,7 @@ sudo docker run -d --name mysql -e MYSQL_RANDOM_ROOT_PASSWORD=true mysql
 
 ### Lecture 24 - Docker Networks: Concepts for Private and Public Comms in Containers
 
+* [docker --format](https://docs.docker.com/config/formatting/)
 * `sudo docker container run -p` sets the port of the running container used on host machine
 * we can see the port used by a container with `sudo docker contianer port <container>`
 * each container connects to a private virtual networ *bridge*
@@ -305,3 +307,145 @@ Address 2: 172.18.0.2 search1.my_net
 ```
 
 * we run curl in centosand get different server uuids `sudo docker container run --rm --net my_net centos:7 curl -s search:9200`
+
+## Section 3 - Container Images, Where to Find Them and How to Build them
+
+
+### Lecture 32 - What is an Image 
+
+* [image specs](https://github.com/moby/moby/blob/master/image/spec/v1.md)
+* is the app binaries and dependencies and metadata of how to run it
+* official def *an ordered collection of root filesystem changes and the corresponding execution parameters for use within a container runtime*
+* not a complete OS. no kerner or kernel modules only binaries. the host provides the kernel
+* small as even one file. (app binary) like a golang static bin
+* big as alinux distro with modules preinstalled
+
+### Lecture 33 - The Mighty Hub: Using Docker Hub Registry Images
+
+* [official image lib](https://github.com/docker-library/official-images/tree/master/library)
+* lecture objectives: basics of docker hub, oficial and non-oficial public images, downloading images, image tags basics
+* we go to dockerhu and search for nginx we get 32k results!!! we go for the official.
+* officials use just the name no slashes. what users create have their username and then a slash and then the image name
+* officials are maintined by docker, well documented, versioned
+* images are tagged and we can use the tags when adding them to our host repo. default tag (when we don specify it with : is the latest)
+* we download images to our repo with `sudo docker pull <image>` (latest version) or `sudo docker pull <image>:<tag>` specific version
+* good practice for production to specify exct version
+* for nginx there is an alpine version with smaller footprint
+* in our local repo we can see the image id to see if images are just different versions of same file (so size does nbot add up)
+* docker hub is like github
+* explore lists official images
+
+### Lecture 34 - Images and their Layers:Discover the Image Cache
+
+* [images & containers](https://docs.docker.com/storage/storagedriver/)
+* lecture objectives: union file syustem, history,inspect commands, copy on write
+* images are made using the union file system aking layers on changes
+* `sudo docker history <image>:<tag>` gives a list
+
+```
+IMAGE               CREATED             CREATED BY                                      SIZE                COMMENT
+7f70b30f2cc6        2 weeks ago         /bin/sh -c #(nop)  CMD ["nginx" "-g" "daemon…   0B                  
+<missing>           2 weeks ago         /bin/sh -c #(nop)  STOPSIGNAL [SIGTERM]         0B                  
+<missing>           2 weeks ago         /bin/sh -c #(nop)  EXPOSE 80/tcp                0B                  
+<missing>           2 weeks ago         /bin/sh -c ln -sf /dev/stdout /var/log/nginx…   22B                 
+<missing>           2 weeks ago         /bin/sh -c set -x  && apt-get update  && apt…   53.4MB              
+<missing>           2 weeks ago         /bin/sh -c #(nop)  ENV NJS_VERSION=1.13.10.0…   0B                  
+<missing>           2 weeks ago         /bin/sh -c #(nop)  ENV NGINX_VERSION=1.13.10…   0B                  
+<missing>           3 weeks ago         /bin/sh -c #(nop)  LABEL maintainer=NGINX Do…   0B                  
+<missing>           3 weeks ago         /bin/sh -c #(nop)  CMD ["bash"]                 0B                  
+<missing>           3 weeks ago         /bin/sh -c #(nop) ADD file:e3250bb9848f956bd…   55.3MB   
+```
+
+* this is a list of the image layers. each image starts as a bare empty layer (scratch) and each change creates a new layer
+* any change in dockerfile or the use of docker commit command creates a new layer
+* diff images can share layers using the image cache. this saves time and space
+* so each image is only stored once. shared layers are not reinstalled. 
+* when we have an apache image and make a container out of it. docker justs adds one more layer for read/write for each container reusing the image thus saving resources.
+* when a container changes or writes to a file in the image this file is copied to the container layer file so the image remains intact for other containers (Copy on Write)
+* `sudo docker inspect <image>:<tag>` shows the image metadata. all sorts of data are included.
+
+### Lecture 35 - Image Tagging and Pushing to DockerHub
+
+* lecture objectives: image tags and how to upload them to hub, image id vs Tag
+* tagging. images have no name appart from the id (hash) they are identified by <user>/<repo>:<tag>, only official ones have no user
+* if i use different tags of the same image i see they have the same image id (is the same image)
+* to add tags we can create our own dockerfiles or tag existing images
+`sudo docker image tag nginx <username>/nginx` i write the image i want  to tag first and then the new tag
+* i see the addition to the image list but the id is the same
+* i try to push it to the hub with `sudo docker push <username>/nginx`
+* i get a denial as i am logedin. login `sudo docker login`
+* i try again and success. i push to dockehub. i can push oly to my username/image or organizations i am a member. the image is on hub now
+* in docker/config.json i see the auth key `sudo cat ~/.docker/config.json` that allows docker cli to login to dockerhub as me
+* if i tag the image i pushed with a different tag eg `sudo docker image tag <username>/nginx <username>/nginx:testing` and push it to hubit does not push as image is the same. but in the image(repo) page on hub i see the new tag in the tag tab 
+* if i want my repo to be private on dockerhub i create the repo/image first on dockerhub as private and then push to it
+
+### Lecture 36 - Building Images: The Dockerfile Basics
+
+* [dockerfile ref](https://docs.docker.com/engine/reference/builder/)
+* we open the dockerfile-sample-1/Dockerfile
+* by default dockerfile is named *Dockerfile* we can use anohter name 
+`sudo docker build -f some-dockerfile`
+* FROM command is required to be present and defines the minimum linux distribution to be used. usually debian:jessie or alpine in recent images. what we specify are actually docker images following the docker naming pattern
+* the main benefit from them is to use their package managemnt system to install software (apt or yam) 
+* ENV is for environment variables (keyvalue pairs)
+* RUN specifies shell commands to be used when running the image (install sw run shell scripts)
+* here run sets the package repository to get the nginx for installation
+* every RUN is a layer. so we use && to chain commands to avoid many layers 
+* the next RUN command points tlogfiles to stdout and stderr. this is the proper way for loging in docker containers. as docker captures them
+* EXPOSE exposes ports to the outside world. so no tcp/ip prots are open unless we specify them. these ports live in the virtual networks
+CMD is a required parameter as it specs the command we will use to launch a new container
+
+### Lecture 37 Building Images: Running Docker Builds
+
+* the dockerfile is used to build an image. 
+* what it says is get the debian:jessie image from dockerhub execute the steps and cache each layer one by one
+* the command i use is `sudo docker image build -t customnginx .`
+* this says to build an image tagged as customnginx in the current dir using the dockerfile with default name *Dockerfile* in the dir.
+* the image is added on the image list but i dont see any build artifacts in the folder
+* tagname is custom as it wont be ppushed to the hub, -t sets the tag
+* if we change the dcockerfile the unchanged layers are not rebuilt . they are cached. only the changed ones. so we get lighting fast built times. to see it i add one more port in EXPOSE and rebuild. it builds FAST. in image list i see an new image id was created
+* at the top of the dockerfile we put things that change the least and in the end things that change more
+
+### Lecture 38 - Building Images: Extending Official Images
+
+* we use dockerfile-sample-2/Dockerfile. here we see only 3 stances (steps or layers). we use the official nginx image to start from. this is ok. if dont need some tweaks. it saves time and effort. 
+* we use WORKDIR step to change dir (cd command) or set the wrokdir
+* we use COPY to copy our localfile to the server (workdir)
+* we dont use CMD. we inherit it from the upstram image. WE DONT INHERIT the ENV though
+* we build the image `sudo docker image build -t nginx-with-html .`
+* we run a container from it `sudo docker container run --rm -p 80:80 nginx-with-html`  and visit localhost to see the webpage
+
+### Lecture 39 - Assignemt:Build our own Dockerfile and run containers from it
+
+* dockerfiles are part process workflow and part art.
+* we take an existing node.js app and dockerize it
+* make a Dockerfile. build it, test it, push it, rm it, run it
+* use the alpine version of the official node 6.x image
+* at it and push it to dockerhub, remove it from local store and run again from hub
+* working docker file
+
+```
+FROM node:6-alpine
+EXPOSE 3000
+RUN apk add --update tini \
+	&& mkdir -p /usr/src/app
+WORKDIR /usr/src/app
+COPY package.json ./
+RUN npm install \
+	&& npm cache clean --force
+COPY app.js ./
+COPY ./public ./public
+COPY ./routes ./routes
+COPY ./views ./views
+COPY ./bin ./bin
+CMD /sbin/tini -- node ./bin/www
+```
+
+* teacher uses 
+
+```
+COPY . . (all to all)
+CMD ["/sbin/tini","--","node","./bin/www"] (no spaces when using string array)
+```
+
+* i run it with `sudo docker container run --rm -p 80:3000 --name test achliopa/node-app`
