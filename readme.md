@@ -191,3 +191,117 @@ sudo docker container ls -a
 sudo docker container run -d --name nginx nginx
 sudo docker run -d --name mysql -e MYSQL_RANDOM_ROOT_PASSWORD=true mysql
 ```
+
+* we see the running gcontainer list with `sudo docker container ls`
+* we see the mysql container process list qith `sudo docker container top mysql` +> only one proc, we do the same for nginx=> 2 procs
+* we use `sudo docker container inspect mysql` => we get a JSON config File
+* we want to see live stats of containers `sudo docker container stats`
+
+### Lecture 23 - Getting a Shell Inside the Container
+
+* to start a container interactively `docker container run -it`
+* to enter a running container and launch a second process (additional command inside) we can also use `docker container exec -it`
+* -t gives a pseudoterminal , -i keep session open to receive input
+* `sudo docker container run -it --name proxy nginx bash` bash is a command passed to the container as argument. thsi command logs me in as root in the container. i see i can type linux shell commands. it is actually a linux installation with a filesystem. i can install packages and do linux admin stuff
+* to exit the shell i type `exit`. now container is stopped
+* the default in containers is to run the image program. we changed that to run bash so that we can start it internally
+* containers run as long as the command in startup script runs
+* i can even run a ful ubuntu container with `sudo docker container run -it --name ubuntu ubuntu`. inside i can use apt package manager `apt-get update` and all
+* ubuntu docker image is minimal. we have to install everything manually
+* to restart a container with shell enabled i write `sudo docker container start -ai ubuntu`
+* to enter a running container and launch a terminal i use `sudo docker contianer exec -it nginx bash`
+* if i then issue ps aux from the terminal inside of the container i see an extra process running for bash
+* if i exit the terminal after the exec command contiane ris still running
+* alpine linux is a small (5MB) security focused linux distro
+* we can pull images from docker hub to our local repo with `sudo docker pull <image>`. we can see our repo with `sudo docker image ls`
+* we run an alpine container with bash terminal 	`sudo docker container run -it alpine bash`. bash is not installed in alpine. we can start only what is installed. we use sh onstead to get inside
+* alpine package manager is apk
+
+### Lecture 24 - Docker Networks: Concepts for Private and Public Comms in Containers
+
+* `sudo docker container run -p` sets the port of the running container used on host machine
+* we can see the port used by a container with `sudo docker contianer port <container>`
+* each container connects to a private virtual networ *bridge*
+* each virtual network routes through a NAT firewall on host IP
+* all containers on a virtual network can talk to each other without setting -p (exposed to the host)
+* best practice is to to create a virtual private network for each app and let the connected servers (images-containers) talk to each other in private. e.g network *my_api* for mongo and nodejs containers, network my_web_app for mysql and apache/php containers
+* Docker defaults work well , but are easy to swap or customize.
+* we can make virtual networks and attach container to more than one virtual network or none
+* if ye want to skip virtual networks and use host IP `--net=host`
+* we can use docker network drivers to get new abilities
+
+```
+sudo docker container run -p 80:80 --name webhost -d nginx
+sudo docker container port webhost
+>>> 80/tcp -> 0.0.0.0:80
+```
+
+* we use inspect with --format option to grep though the config file of the running container for its virtual network ip
+
+```
+sudo docker container inspect --format '{{ .NetworkSettings.IPAddress }}' webhost
+>>> 172.17.0.2
+
+* running containers connect to a virtua network (bridgE or dockerO) through thir ports. virtual netwokr does to the routing to the host. host by default has a edge firewall to the external worls opening ports on demant -p (--publish) does that opens a port on host firewall and routes it through the docker bridge to the virtual nw ip and port
+```
+
+### Lecture 26 - Docker Networks: CLI Management of Virtual Networks
+
+* to list all  networks on machine `sudo docker network ls`
+* to inspect a network confog file `sudo docker network inspect <networkid or name>`
+* to create anetwork `sudo docker network create --driver`
+* attach/detach a container to a network `sudo docker network connect/disconnect`
+* beidge is the default docker virtual network
+* if we inspect it in the config file we see all teh contianer attached to it, ips etc also the gatweay
+* host network is a special network that attaches virtual networks to host
+* none is a network with nothing attached.not even a driver
+* we createa virtual network `sudo docker network create my_app_net` and list it and inspect it. it uses bridge driver and a different subnet
+* several options available when creating a nw
+* we can use --network flag to specify the network for our new contianer to be attached `sudo docker container run -d --name new_nginx --network my_app_net nginx`
+* we can connect a running container to a nw. `sudo docker network connect <networkid> <containerid>`. if the container is connected to a network now it is connected to two networks
+* docker offers security. all ports closed by default . we manually expese what we want with -p
+
+### Lecture 27 - DNS and how Containers Find Each Other
+
+* DNS is the key to ease inter-contianer ccomms. ips are dynamic
+* --link option enables DNS on default bridge network
+* Docker uses DNS naming and has abuilt in DNS server. container names are the host names
+* i add a secont container in my_app_net. i inspect the network config to verfiy that. the two contianers can communicate to each other with their names through DNS
+* ican ping each other (my images should be nginx:alpine though) with `sudo docker container exec -it my_nginx ping new_nginx`
+* the default BRIDGE network does not have abuilt in DNS server so when we run containers we have to use --link and a list of container names in [sont1, cont2] that he can talk to. in networks we create DNS is serve ris built in so no needfor --list
+
+### Lecture 28 - Assignement: Use containers for cli testing
+
+* use different linux distro to test curl cli tool version
+* we use different terminal windows to start bash on cenos:7 and ubuntu:14.04 using -it. docker container -rm to clean up af5ter
+* ensure culr is installed and updated on latest version. ubuntu: apt-get update && apt-get install curl, centos: yum update curl
+* check unstall: curl --version
+* DONE
+* Seems like if i add --rm when I run a contianer it gets erased after stoping
+
+### Lecture 30 - Assignemnt DNS round-robin test
+
+* basic dns commands (alias)
+* round robin is the concept of multiple servers licening to the same dns name
+* since docker engine 1.11 we can have multiple containers on a CREATED network respond to the same DNS addres using alias
+* we create a new virtual network (default driver) , create 2 contianers from ealsticsearch:2 image
+* we use the *--net-alias search* when creating them to give them an additional DNS name to repsond to
+* By default i cannot run containers with the same name. alias solves it
+* we run alpine nslookup search with --net to see the two containers list for the same DNS name
+* run centos curl -s search:9200 with --net multiple times to see both names fields show
+* round robin is not a true load balancer
+* we create the new virtual network `sudo docker network create my_net`
+* we create 1st container add it to nwetworka nd set an alias `sudo docker container run -d --name search1 --network my_net --net-alias search elasticsearch:2`
+* we create 2nd container add it to nwetworka nd set an alias `sudo docker container run -d --name search2 --network my_net --net-alias search elasticsearch:2`
+* we create alpine container `sudo docker container run --rm -it --name alpine --network my_net alpine sh`
+* we create centos contianer `sudo docker container run -it --rm --name centos --network my_net centos:7 bash
+`
+* we run nslookup in alpine and get 
+
+```
+Name:      search
+Address 1: 172.18.0.3 search2.my_net
+Address 2: 172.18.0.2 search1.my_net
+```
+
+* we run curl in centosand get different server uuids `sudo docker container run --rm --net my_net centos:7 curl -s search:9200`
