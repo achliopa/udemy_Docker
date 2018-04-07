@@ -547,3 +547,121 @@ sudo docker container rm -f postgres postgres2
 * this bridges the gap  of local file acces and running in containers
 * tutor has a ready image for us, we run it with `docker contianer run -p 80:4000 -v $(pwd):/site bretfisher/jekyll-serve`
 
+## Section 5 - Making it Easier with Docker Compose: The MultiContainer Tool
+
+### Lecture 48 - DOcker Compose and the docker-compose.yml file
+
+* [yaml format](http://www.yaml.org/start.html)
+* [yaml quickref](http://www.yaml.org/refcard.html)
+* [compose spec](https://docs.docker.com/compose/compose-file/compose-versioning/)
+* we use compose to configure relationships between containers
+* we use it to save our docker run settingsin easy to read files
+* we use it to create one-liner developer environment startup commands
+* compose is made of 2 parts
+* a YAML file that describes our solution options for: containers, networks, volumes
+* a CLI tool *docker-compose* used for local dev/test automation using the YAML file
+* docker-compose.yml has its own versions 1,2,2.1,3,3.1'[
+* yaml file can be used with docker-compose command for local docker automation
+* with docker command directly in production with Swarm 
+* `docker-compose --help` for help, 
+* docker-compose.yml is the default filename. a custom yaml file can be used with `docker-compose -f`
+* a template yaml compose file is in compose-dample-1 folder. with the term services we mean containers. in yaml list elements are writen with dashes
+* if we want to tun the last assignemnt with jekyll with compose the yaml file would be:
+
+```
+version: '2'
+
+# same as 
+# docker run -p 80:4000 -v $(pwd):/site bretfisher/jekyll-serve
+
+services:
+  jekyll:
+    image: bretfisher/jekyll-serve
+    volumes:
+      - .:/site
+    ports:
+      - '80:4000'
+```
+
+* compose-2 and compose-3.yml files are more complex
+
+### Lecture 49 - Tring out Basic Compose Commands
+
+* [compose github](https://github.com/docker/compose/releases)
+* cli comes bundled with docker engine in mac/windows but is separate in linux
+* its not production grade but great for local development and test.
+* common commands are `docker-compose up` setup volume networks and start all containers, `docker-compose down` stop all containers and remove cont/vol/net 
+* if our project has a Dockerfile and docker-compose.yml then startind a project in dev environment would be
+
+```
+git clone github.com/some/sw
+docker-compose up
+```
+
+* in compose-sample-2 i check the docker-compose.yml file. it creates 2 containers seting a volume to nginx for nginx.conf file
+
+```
+version: '3'
+
+services:
+  proxy:
+    image: nginx:1.13 # this will use the latest version of 1.13.x
+    ports:
+      - '80:80' # expose 80 on host and sent to 80 in container
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  web:
+    image: httpd  # this will use httpd:latest
+```
+
+* we docker-compose it up, -d runs it in background, nginx is acting as proxy to the apache server
+* `docker-compose logs` shows logs
+* `docker-compose ps` shwows running processes `docker compose top` a formatted list. `docker-compose down` to stop all
+
+### Lecture 50 - Assignement: Build a Compose File For a Multi-Container Service
+
+* [compose file ref](https://docs.docker.com/compose/compose-file/)
+* build a basic compose file for a drupal cms website. 
+* use drupal with postgres. expose drupal with ports to 8080
+* set POSTGRES_PASSWORD for postgres. walk through drupal setup in browser
+* drupal assumes DB is localhost, but it is the service name as they dont run in same container
+* use volumes to store drupal unique data
+* we check drupal in dockerhub for volumes and exposed ports and postgres for password setup
+* my yaml is 
+
+```
+version: '2'
+
+services:
+  drupal:
+    image: drupal
+    ports:
+      - 8080:80
+    volumes:
+      - drupal-modules:/var/www/html/modules
+      - drupal-profiles:/var/www/html/profiles
+      - drupal-sites:/var/www/html/sites
+      - drupal-themes:/var/www/html/themes
+  postgres:
+    image: postgres
+    environment:
+      - POSTGRES_PASSWORD=rootroot
+volumes:
+  drupal-modules:
+  drupal-profiles:
+  drupal-sites:
+  drupal-themes:
+```
+
+* i docker-cmompose up 
+* enter localhost:8080 and set options in drupal db name and user: postgres
+* drupal cannot connect to postgres because it searches it in localhost . in advanced setting we set host to postgres (container name) and success! we have a working drupal server
+* to cleanup we run `docker-compose down -v` top remove also the volumes
+
+### Lecture 52 - Adding Image BVuilding to Compose Files
+
+* [compose build options](https://docs.docker.com/compose/compose-file/#build)
+* docker compose can build custom images at runtime
+* will build them with docker-compose up if it cannot find them in cache.
+* we can rebuild the images when we change them with `docker-compose build` or `docker-compose up --build`
+* this is good for complex builds that have lots of vars or build arguments
