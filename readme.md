@@ -666,3 +666,68 @@ volumes:
 * will build them with docker-compose up if it cannot find them in cache.
 * we can rebuild the images when we change them with `docker-compose build` or `docker-compose up --build`
 * this is good for complex builds that have lots of vars or build arguments
+* in compose-sample-3 we have a ready docke-compose.yml file. there we add the build: param to the proxy service specifying the dockerfile(custom name) amd the target image to be build. so we can use the compose file to build our custom image before starting the container
+* in the same file we bind mount an html folter from the host containing the artifacts to the apache server
+* the actual copy of nginx.conf to the container dir is happening in the dockerfile
+* compose.yml will look for  nginx-custom in cache. if its not there it will build it from compose.yml orders
+* i docker-compose up and launch the servers. It works
+* combining nginx with httpd is done to emulate a production environment
+* docker-compose down does not by default remove image we need the --rmi flag with the local name. to use local i need to not give the image i build a name so that ituses the local naming convention. i remove it from the compose file and rebuild. i docker-compose --rmi local and image is gone. using all will delete all images used in the build from cache even httpd that we might use in other projects
+
+### Lecture 53 - Assignment:Compose For Run-Time Image Building and Multi-COntainer Development
+
+* we build a custom drupal image for local testing
+* compose is not only for devs but for testers as well
+compose is great for testing frameworks and apps
+* we use compose file from previous assignemtn . we add a Dockerfile
+* see the Readme.md
+
+* docker-compose.yml
+
+```
+# create your drupal and postgres config here, based off the last assignment
+version: '2'
+
+services:
+  drupal:
+    image: custom-drupal
+    build: .
+    ports:
+      - 8080:80
+    volumes:
+      - drupal-modules:/var/www/html/modules
+      - drupal-profiles:/var/www/html/profiles
+      - drupal-sites:/var/www/html/sites
+      - drupal-themes:/var/www/html/themes
+  postgres:
+    image: postgres:9.6
+    environment:
+      - POSTGRES_PASSWORD=rootroot
+    volumes:
+      - drupal-data:/var/lib/postgresql/data
+volumes:
+  drupal-modules:
+  drupal-profiles:
+  drupal-sites:
+  drupal-themes:
+  drupal-data:
+```
+
+* dockerfile
+
+```
+# create your custom drupal image here, based of official drupal
+FROM drupal:8.5
+RUN apt-get update \
+	&& apt-get install -y git \
+	&& rm -rf /var/lib/apt/lists/*
+WORKDIR /var/www/html/themes
+RUN git clone --branch 8.x-3.x --single-branch --depth 1 https://git.drupal.org/project/bootstrap.git \
+	&& chown -R www-data:www-data bootstrap
+WORKDIR /var/www/html
+```
+
+* command: `docker-compose up` install drupal and connection to postgres like 1st assignment, `docker-compose -v`
+* -y flag in apt-get install says yes to the propmpts during installation
+* --single-branch --depth 1 in git clone, gets only last commit of the specified branch
+* docker works as root in its containers so if we want a special user for an app we need to chown -R (for subfolders)
