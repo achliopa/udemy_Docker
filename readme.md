@@ -731,3 +731,121 @@ WORKDIR /var/www/html
 * -y flag in apt-get install says yes to the propmpts during installation
 * --single-branch --depth 1 in git clone, gets only last commit of the specified branch
 * docker works as root in its containers so if we want a special user for an app we need to chown -R (for subfolders)
+
+## Section 6 - Swarm Intro and Creating a 3-Node Swarm Cluster
+
+### Lecture 55 - Swarm Mode: Built-In Orchestration
+
+* [swarm topology video](https://www.youtube.com/watch?v=dooPhkXT9yI)
+* [swarm orchestration video](https://www.youtube.com/watch?v=_F6PSP-qhdA)
+* [topology management](https://speakerdeck.com/aluzzardi/heart-of-the-swarmkit-topology-management)
+* the promise of docker is to deploy microservices in a uniform way everywhere (cloud, local machines)
+* small organizations or solo developers have problem managing multiple nodes. Common Problems/Quastions:
+	* automate container lifecycle
+	* easily scale out/in/up/down
+	* ensure containers are recreated if they fail
+	* replace containers without downtime (blue/green deploy)
+	* track/control containers startup
+	* create cross-node virtual networks
+	* ensure trusted servers to run containers
+	* store secrets, keys, passwords. get them to right container
+* SWARM MODE
+	* a clustering solution built inside Docker
+	* Added in v1.12 (summer 2016) via SwarmKit toolkit
+	* Enhanced in v1.13 (Jan 17) via Stacks and Secrets
+	* Not enabled by default. Once enabled new commands are available `docker swarm` `docker node` `docker service` `docker stack` `docker secret`
+* There are Manager Nodes and Worker Nodes. Managers have Certificate Authority. Communication is Encrypted (TLS). Nodes are Cloud VMs or Physical Machines
+* Managers can be also  workers. nodes can be demoted or promoted to each role
+* there is an internal distributed state store for swarm
+* a manager is a worker with permission to control the swarm
+* with `docker container run` we can run only one container. it does not have provisions how to scale up or out
+* a service can have multiple tasks. each task will launch a container. managers decide where on the swarm to place them
+* a whole new api implements the service in swarm mode. `docker service create` starts the manager node and RAFT DB:
+	* API: Accepts commands from client and creates service object
+	* Orchestrator: Reconcilliation loop for service objects and creates tasks
+	* Allocator: Allocates IP addresses to tasks
+	* Scheduler: Assigns Nodes to tasks
+	* Dispatcher: Checks in on Workers
+* on worker node :
+	* Worker: connects to dispatcher to check on assigned tasks
+	* Executor: Executes the tasks assigned to worker node
+
+### Lecture 56 - Create your first Service and Scale it locally
+
+* [deploy to swarm](https://docs.docker.com/engine/swarm/services/)
+
+* on our local machine we can start a 1 node docker swarm for testing
+* we test our docker install for swarm existence with `docker info`. swarm is inactive
+* we enable it with `sudo docker swarm init` this adds our machine as a manger node in a swarm (joins the swarm). DONE
+* what this command does: lots of Publik Key Infra and Security Automation
+	* Root Signing Certificate created for the swarm
+	* certificate is issued for first Manager node
+	* join tokens for nodes are created
+* also it creates a RAFT database to store root CA, configs and secrets
+	* db is encrypted by default on disk (v1.13+)
+	* no need for another key/value system to hold orchstration/secrets
+	* replicates logs amng managers via mutual TLS in control plane
+* Raft is a protocol that ensures consistensy among multiple nodes, perfect for cloud [raft](https://raft.github.io/)
+* No need for separate key infrastucture
+* we can get a list of our swarm nodes with `docker node ls`
+* docker node group of commands gives the ability to manage nodes (promote,demote, inspect, list, rm, update)
+* docker swarm group of commands maanges our node (running the cli) relation to the swarm he is participating to (join, leave, init, keys)
+* docker service group of commands manages the service/s running on the swarm, it is more or less a docker run similar but for a swarm istead of a one localmachine.
+* we create a service with `sudo docker service create alpine ping 8.8.8.8` this service gets an id 
+* we can see in `docker service ls`. it gets a random name and it spawned 1 replica out of 1 (default). the first number is how many replicas are actually running  and the nuber on the roght is how many we specified that can be created (max)
+* with `docker service ps <service name>` we can get more info on each replica. the task it is rnning, the node name, its name
+* if we now run `docker container ls` we see the task as a local service with a name <service>.<replica_num>.<replica id>
+* we can scale up the service to 3 replicas with `sudo docker service update <Service ID> --replicas 3`
+* docker service ls and ps confirm that service now runs 3 replicas/tasks on host
+* docker update group of commands manages resources of container. very useful on swarms
+* docker service update command gives much more options, as its goal is to allocate resources and manage containers on the fly woithout stoping them
+* if i remove one task with  docker container rm -f, swarm wll see it and launch a new one. service ps shows the history
+* to remove all containers we have to remove the service completely, service is gone but contianers still run for a while till theya re stoped
+
+### Lecture 58 - Creating a 3-Node Swarm Cluster
+
+* [digital ocean coupon](https://www.digitalocean.com/?refcode=b813dfcad8d4&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=CopyPaste)
+* [ssh in do](https://www.digitalocean.com/community/tutorials/how-to-use-ssh-keys-with-digitalocean-droplets)
+* [docker swarm firewall](https://www.bretfisher.com/docker-swarm-firewall-ports/)
+
+* Available option to deploy multiple nodes
+	* play-on-docker.com is good for testing nodes in swarm but runs for 4 hours
+	* docker-machine + Virtual boxes (needs >=8gb ram)
+	* digital ocean + docker install (mimics production setup)
+	* our own build: docker-machine has machines for AWS, Azure, DO, GoogleCloud (use get.docker.com)
+* we dont use docker-machine in production
+* if we hav edocker-machine on our system we install virtual box. then with `docker-machine create nodeX` we create our nodes on our system
+* once we have these nodes we can access them with `docker-machine ssh nodeX` or we can set docker CLI on host to see the node with `docker-machine env nodeX` and `eval $(docker-machine env nodeX)`
+* we go to DigitalOCean, we go for 10$ option with ubuntu 16. we add our sssh key and create 3 machines called node1 2 3.
+*  i `ssh root@<ip>` to the nodes
+* to install docker on the noes we use the script from get.docker.com
+and run the followinf commands in the 3 nodes
+
+```
+curl -fsSL get.docker.com -o get-docker.sh
+sh get-docker.sh
+```
+
+* we have docker on our nodes so now we want to start the swarm. swarm in cloud servers asks for an ip so that it is visible from other nodes. we use the public ip of the host. `docker swarm init --advertise-addr <IP addr>`
+* we copy the swarm join command from node 1 (manager) console and copy it to node 2
+
+```
+docker swarm join --token SWMTKN-1-61sezz5a5u896kpvt5x8ejuonfeki1qtjvr3ji3k7ju7suiqni-bu7prqpxpn9vfqybxjh3zqc7l 46.101.193.122:2377
+```
+
+* node 2 is now a worker to the swarm
+* `docker node ls` is available only to the manager node1 and lists the nodes. workers have no swarm commands available. 
+* if i want to promote a node from worker to manager i have to do it from the manager node `docker node update --role manager node2`
+* node1 is still the Leader and node2 reacable. swarm commands a re avaialble to nod2
+* we will add node3 as swarm manager by default from node1 using `docker swarm join-token manager` and get the manager join command and token in console
+
+```
+docker swarm join --token SWMTKN-1-61sezz5a5u896kpvt5x8ejuonfeki1qtjvr3ji3k7ju7suiqni-f0b60d1zyr7077whwsxlbu2l7 46.101.193.122:2377
+```
+
+* we cp it in node3 console. node1 is still the leader (original node)
+
+* token and join commands are invoked with the previous command for manager and worker. no need to store the keys somewhere. also keys can be rotated for security reasons
+* we create a service like before specifying size 3 replicas. `docker service create --replicas 3 alpine ping 8.8.8.8`
+* if we ps the service we see that each repolica is running on a node
+* with `docker node ps` we see the task running on the specific node if i add the node name i see the task running on that node
