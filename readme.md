@@ -849,3 +849,314 @@ docker swarm join --token SWMTKN-1-61sezz5a5u896kpvt5x8ejuonfeki1qtjvr3ji3k7ju7s
 * we create a service like before specifying size 3 replicas. `docker service create --replicas 3 alpine ping 8.8.8.8`
 * if we ps the service we see that each repolica is running on a node
 * with `docker node ps` we see the task running on the specific node if i add the node name i see the task running on that node
+
+## Section 7 - Swarm Basic Features ansd How to use them in your Workflow
+
+### Lecture 59 - Scaling Out with Overlay Networking
+
+* swarm introduces overlay multi-host networking. we invoke it with `--driver overlay` when creating a virtual network. it is a swarm wide bridge network
+* it handles intra swarm container-to-container communication inside a single swarm
+* we can enable IPSec (AES) on network creation (off by default for performance)
+* each service can connect to multiple networks (e.g frontend / backend)
+* we create an overlay network for a drupal multihost service. `docker network create --driver overlay mydrupal`
+* we create a postgres service to run in the mydrupal network `docker service create --name psql --network mydrupal -e POSTGRES_PASSWORD=rootroot postgres`, we check it with docker service ls and ps. it runs on node2
+* i create a drupal service in the same network `docker service create --name drupal --network mydrupal -p 80:80 drupal`. it exports port 80 and runs on node1.
+* drupal and postgres talk to each other using their service names as hostnames as they are in the same virtual network.
+* i can access drupal webserver in my browser with any of the node public ips. 
+* i install drupal and connect it to postgres like we did before. i can access it from any ip. site externaly looks like it is runnign on all nodes but i know it runs only in node1. if we inspect the service we see it has only 1 ip on the virtual netwrk so why we can access it from all public ips?
+
+### Lecture 60 - Scalling Out with Routing Mesh
+
+* [routing mesh](https://docs.docker.com/engine/swarm/ingress/)
+*  the prvious question is answered by the Routing Mesh which routes ingree (incoming) packets for a Service to the proper task
+* this is the ingress overlay network appearing in the network list with swarm scope (spans all nodes)
+* uses IPVS from linux kernel
+* load balances swarm services accross all node tasks and listens all nodes for traffic
+* 2 examples of its functionality:
+	* container-to-container comm in an overlay nw (using VIP) e.g server cluster
+	* external in/out traffic to published ports (ALL NODES LISTEN). all nodes listen but route the traffic to the node with least load/traffic using load balancing
+* if i have a 3 replica swarm service running as 3 tasks/containers on 3 nodes with different ips. it created a new virtual network IP for the service (using its name as host name for DNS). Everybody that wants to talk to this service internallyuses this VIP and load balancer does the rest, this DNS routing is like RoundRobin (we can use it instead) but its superior as it mimics a HW load balancer
+* anyone using a nodes public ip and the published port goes to the swarm load balancer attached to the external ip address. this load balancer decides where to assing the request using the virtual network ip addresses
+* to see it in action we create a 3 replica elasticsearch service. `docker service create --name search --replicas 3 -p 9200:9200 elasticsearch:2`. i check it with `docker service ps search`
+* as the port 9200 is published in node1 i can see it talking with `curl localhost:9200`. i hit it multiple times and get a different name each time. these are the 2 node tasks talking with loadbalancer sending my request to a node.
+* at Docker v1.13 Routing Mesh Cont. is STATELESS Load balancing. so if we consistently want to talk to a SPECIFIC task then we need tweaking
+* this LoadBalancer is OSI Layer 3 (TCP) not layer 4 (DNS)
+* To overcome this limitation we can use Nginx or HAProxy LB proxy
+* Docker EE comes with built-in L4 web proxy
+
+### Lecture 61 - Assignemtn: Create a Multiserrvice Multinode Web App
+
+* we will use a multilayer app for this assignelment. we will use the Docker's [Distributed Voting App](https://github.com/dockersamples/example-voting-app)
+* we will use the swarm-app-1 dir 
+* we need 1 volume, 2 networks 5 services
+* a good approach is to test scripts locally before running them in production
+* we never build images in production. we build them using CI and push them to dockerhub
+* see the readme.md for steps and instructions (relalife case of sw architect that is docker agnostic)
+
+* step 1: create and list overlay networks
+
+```
+docker network create --driver overlay backend
+docker network create --driver overlay frontend
+docker network ls
+```
+
+* step 2: create the vote service
+
+```
+docker service create --name vote --replicas 2 -p 80:80 --network frontend dockersamples/examplevotingapp_vote:before
+```
+
+* step 3: create redis keystore (1 replica)
+
+```
+sudo docker service create --name redis --network frontend redis:3.2
+```
+
+* step 4:create db, our source is a named volume
+
+```
+docker service create --name db --network backend --mount type=volume,source=db-data,target=/var/lib/postgresql/data postgres:9.4
+```
+
+* setp 5: create worker and attach to 2 networks
+
+```
+docker service create --name worker --network backend --network frontend dockersamples/examplevotingapp_worker
+```
+
+* step 6: add resiutls
+
+```
+docker service create --name result -p 5001:80 --network backend dockersamples/examplevotingapp_result:before
+```
+
+* option -v is not supported in service commands
+* we use ps to see the services
+* we use docker servicce logs <servicename> to check tyhe logs
+
+### Lecture 63 - Swarm Stacks and Production Grade Compose
+
+* [feats not supported in stack deploy](https://docs.docker.com/compose/compose-file/#not-supported-for-docker-stack-deploy)
+* at v1.13 docker added a layer of abstration on swarms called stacks
+* stacks are compose files for production swarms
+* stacks accept compose files as their declartative definition for services,networks and volumes
+* we use `docker stack deploy` much like `docker-compose up` to impor the stack file and run the commands in it
+* stack manages  all objects for us. like overlay network per stack adds stack name to start of their name
+* we can use existing networks etx using *external* in the file
+* in our stack compose file we use *deploy:* and not *build:*
+* building should not happen in aswarm. build must happen locally and pushed to dockerhub
+* compose now ignores deploy: swarm igoners build: 9so we can use same file for development and production
+* docker-compose cli not needer on a swarm node
+* stack yaml compose file can have multiple services and volumes and overlay networks
+* stack is for 1 swarm
+* our whole previous assignemtn app creation on swarm using commands can be replaces by a single stack file
+
+```
+version: "3"
+services:
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379"
+    networks:
+      - frontend
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 2
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+  db:
+    image: postgres:9.4
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+  vote:
+    image: dockersamples/examplevotingapp_vote:before
+    ports:
+      - 5000:80
+    networks:
+      - frontend
+    depends_on:
+      - redis
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 2
+      restart_policy:
+        condition: on-failure
+  result:
+    image: dockersamples/examplevotingapp_result:before
+    ports:
+      - 5001:80
+    networks:
+      - backend
+    depends_on:
+      - db
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 2
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+
+  worker:
+    image: dockersamples/examplevotingapp_worker
+    networks:
+      - frontend
+      - backend
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels: [APP=VOTING]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+      placement:
+        constraints: [node.role == manager]
+
+  visualizer:
+    image: dockersamples/visualizer
+    ports:
+      - "8080:8080"
+    stop_grace_period: 1m30s
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+networks:
+  frontend:
+  backend:
+
+volumes:
+  db-data:
+```
+
+* stack files must be v3 or higher
+* deploy metadata gives more fine grain control on deploys, how to treat updates, restarts etc, or add contstrains to run on a specific node
+
+```
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 2
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+```
+
+* we insert the stack file with vim at node1 and run it `docker stack deploy -c example-voting-app-stack.yml voteapp`
+* docker stack command set is limited
+* docker stack is seen as an entity in docker i can see its tasks with `docker stack ps <stackname>` and where they are runnin on
+* i can see the stack services with `docker stack services <stackname>` like docker service ls
+* we see that appname precedes all names
+* manually typing commands to change our stack is a nono. we should change the file instead
+* to redeploy stack after cahnging the yaml file i repeat the deploy command
+
+### Lecture 64 - Secrets Storage for Swarms: Protecting the env variables
+
+* a new feat at v1.13.1 is secrets
+* its the easiest secure solution for storing secrets in a swarm
+* it is encrypted on disk , in transit and is used where it needs to be.
+* a secret might be: usernames and passwords, TLS cerificates and keys SSH keys, api keys. any data we dont want unwanted eye to see.
+* VAULT is good for storing secrets but is a different installation and needs integration . is not built in
+* Secrets storage supports genric strings or binaries up to 500Kb in size, 
+* dos not require apps to be rewritten
+* as of 1,13,0 Swarm Raft Db is encrypted on disk.
+* only stored on dosk on manager nodes
+* the way keys get to containers is through the control plane or encrypted communication (TLS + Mutual Auth) between managers and workers
+* secrets a re first sttored in Swarm raft DB the assigned to services
+* they look like files in a container but are actual in-memory fs
+in `/run/secrets/<secret_name>` or `/run/secrets/<secret_alias>` as kkey value pairs where key is the name and value the content
+* if we use secrtets localy we can add them to the compose file. it can use file based secrets but not secure
+* if you dont have swarms you cant use secrets but docker-compose fakes it in sake of having uniform yaml files for dev and prod. it copies the secrets to normal text files
+
+
+### Lecture 65 - Using Secrets in Swarm Services
+
+* [docker secrets](https://docs.docker.com/engine/swarm/secrets/)
+* there are 2 ways we can createa secret in a swarm. using a tfile or passing it in commandline
+* we go for 1st option. in node1 in the *secrets-sample-1* folder where the file to be added resides we run `docker secret create psql_user psql_user.txt`
+* we add the password as a command to the secrets `echo "myDBpassWORD" | docker secret create psql_pass -` dash says the command to read the secret from stdin
+* the most secure way is to add the secrets through files and then remove the files
+* i can see the secrets with `docker secret ls` and inspect them. i dont see the original value though
+* we use the secrets by creating a service and passing them as env parameters `docker service create --name psql --secret psql_user --secret psql_pass -e POSTGRES_PASSWORD_FILE=/run/secrets/psql_pass -e POSTGRES_USER_FILE=/run/secrets/psql_user postgres` the command says take the secret and assign it to the service so that its containers have access to it, this maps secrets to service but it doesnt tell postgress service how to use them. the -e flag does that passing the secrets as env params as files
+* psql runs on node2. so we will test there through bash `docker exec -it psql.1.tkzjulxny00edvgh9lr27ufw5 bash` through bash i run `ls /run/secrets` and see the 2 files if i more them i see the vlas unencrypted
+* if i remove the secret from the service `docker service update --secret-rm`, the service will redeploy the containers (immutable design) will not update them it will create new ones. not good for DBs. need to come up with a plan how to update passwords in databases
+
+### Lecture 66 - Using Secrets with Swarm Stacks
+
+* [compose file secrets](https://docs.docker.com/compose/compose-file/#secrets-configuration-reference)
+* now that we know how to add secrets to services we will see how to add them in stacks.fa-vinewe work on *secrets-sample-2* folder in node1. we have a yaml compose file for the stack and 2 txt files witht he credentials to add as secrets
+* to use secrets in stacks the version has to be 3.1
+* in the compose file we have the root secrets key whre the files for the secrets are added  (./ for working dir). to use them in stack yaml file we need to have them in a file or precreated in command line (if we have them precreated instead of file calling we do external calling in secrets key)
+* we first set the keys and then add them to the service that needs them
+* long form o fsecrets in a compose yaml file adds users, roles and permissions
+* we use the file (yaml with secrets added) in a standard deploy command. `docker stack deploy -c docker-compose.yml mydb`
+* when i add secrets with stack when i remove the stack `docker stack rm mydb` secrets are removed as well. when ai manually add secrets ato a service i have to delete them manually
+* in prod environments we must clean files and bash logs with secrets
+
+### Lecture 67 - Assignemnt: Create a Stack w/ Secrets and Deploy
+
+* we will use the drupal compose file from *compose-assignment-2* and extend it with secrets
+* rename image back to official drupal:8.2
+* remnove build:
+* add secret via external: (command line)
+* use environment var POSTGRES_PASSWORD_FILE
+* add secret via cli `echo "<pw>" | docker secret create psql-pw -`
+* copy compose file into new yaml file on our swarm node1
+* solution - yaml file
+
+```
+# create your drupal and postgres config here, based off the last assignment
+version: '3.1'
+
+services:
+  drupal:
+    image: drupal:8.2
+    ports:
+      - 8080:80
+    volumes:
+      - drupal-modules:/var/www/html/modules
+      - drupal-profiles:/var/www/html/profiles
+      - drupal-sites:/var/www/html/sites
+      - drupal-themes:/var/www/html/themes
+  postgres:
+    image: postgres:9.6
+    secrets:
+      - psql-pw
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/psql-pw
+    volumes:
+      - drupal-data:/var/lib/postgresql/data
+volumes:
+  drupal-modules:
+  drupal-profiles:
+  drupal-sites:
+  drupal-themes:
+  drupal-data:
+secrets:
+  psql-pw :
+    external: true
+```
+
+* commands 
+
+```
+echo "rootroot" | docker secret create psql-pw -
+docker stack deploy -c docker-compose.yml myapp
+```
+
+* test in browser enter drupal set posgres credential (dont forget the hostname myapp_postgres) and it works!!!!!!
