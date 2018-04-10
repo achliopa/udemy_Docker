@@ -1227,3 +1227,83 @@ is supported in Dockerfile, Compose YAML, docker run, swarm services
 * better than just checking that it runs. it can combined with an assertion network in code
 * not AN EXTERNAL MONITORING REPLACEMENT
 * Healthcheck status shows up in `docker container ls`
+* the last 5 healthchecks appear in `docker container inspect`
+* docker run command takes no action on an unhealthy container
+* once run command considers it unhealthy its going to appear in ls and inspect
+* but docker swarm service DOES take action. stack and service will replace this task with a new one on a new host
+* healthchecks are used in serviceupdtates to decide to the readiness before replacing containers with new ones
+* an example of adding a healthcheck at runtime to the run command of an image (elasticsearch) that has no builtin healthchecks (Dockerfile)
+
+```
+docker run --health-cmd="curl -f localhost:9200/_cluster/health || false" \
+		--health-interval=5s --health-retries=3 \
+		--health-timeout=2s --health-start-period=15s \
+		elasticsearch:2 
+```
+
+* in this command we use as healthcheck a curl to a specific page that elasticsearch provides for testing its health status, we OR it with false so that we get back 1 if its not OK
+
+* if we integrate healthchecks to a dockerfile the format is different
+* available options
+
+```
+--interval=DURATION (default: 30s)
+--timeout=DURATION (default: 30s)
+--start-period=DURATION (default: 0s) (17.09+)
+--retries=N (default: 3)
+```
+
+* basic command with default options
+
+```
+HEALTHCHECK curl -f http://localhost/ || false
+```
+
+* custom option with a command
+
+```
+HEALTHCHECK --timeout=2s --interval=3s --retries=3 \
+	CMD curl -f http://localhost/ || false
+```
+
+* start time adds a delay for slow apps
+
+* a sample dockerfile for an nginx app would be
+
+```
+FROM nginx:1.13
+HEALTHCHECK --interval=30s --timeout=3s \
+	CMD curl -f http://localhost/ || exit 1
+```
+
+* a postgres dockerfile w/ healthcheck
+
+```
+FROM postgres
+
+# specify real user with -U to prevent errors in log
+HEALTHCHECK --interval=5s ==timeout=3s \
+	CMD pg_isready -U postgres || exit 1
+```
+
+* healthcheck in a composer/stack file example
+
+```
+version: "2.1" #(minimum for healthchecks)
+services:
+	web:
+		image: nginx
+		healthcheck:
+			test: ["CMD","curl","-f", "http://localhost"]
+			interval: 1m30s
+			timeout: 10s
+			retries: 3
+			start_period: 1m #version 3.4 minimum
+```
+
+* many apps have a status url for healthchecks
+* we test the healthchecks by running an image without and with healthcheck in the cli . after starting without healthchecks`sudo docker run --name p1 -d postgres` the ls gives no health indication
+* if i run again with a health check `sudo docker run --name p2 -d --health-cmd="pg_isready -U postgres || exit 1" postgres` and default options i see in ls at status a health indication depending on the state. also if i run the  inspect command i see a health section in the metadata
+* we will now start a service with a health check. normally service has 3 states Preparing(download image)=>Starting(execute container and bring it up)=>Running
+* without healthchecks the transition from starting tyo ruinning is fast `docker service create --name p1 postgres`
+* with healthchecks `docker service create --name p2 --health-cmd="pg_isready -U postgres || exit 1" postgres` the state transition is clear
