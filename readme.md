@@ -1424,3 +1424,47 @@ docker push 127.0.0.1:5000/hello-world
 
 * re test in browser and see the repo
 * we can now start a service using the image from the registry 27.0.0.1:5000/hello-world
+
+* swarms have to use a cetral repository to pull their images cannot be stored locally in cache
+* use a hosted SaaA registry if possible.
+
+### Lecture 81 - Third Party Image Registries
+
+* Docker HUb
+* Docker EE DTR (Docker Trusted Registry)
+* Docker Registry
+* Quay.io
+* AWS,Azure,GoogleCLoud own registry option in their toolset
+* [List of Registriues](https://github.com/veggiemonk/awesome-docker#hosting-images-registries)
+
+## Section 10 - Extras , Common Questions and Resources
+
+### LEcture 82 - DoceCon 2017 Video - Journey to Docker Prod
+
+* [video](https://dockercon.docker.com/watch/WdAeLaLuSCNQwEp61YVXUt)
+
+### Lecture 83 - Bonus Lecture: Swarm Raft Quorum and Recovery
+
+* [orchestration](https://www.youtube.com/watch?v=Qsv-q8WbIZY)
+
+### Lecture 84 - Bret's Docker and DevOps Newsletter
+
+* [link](https://www.getdrip.com/forms/54453022/submissions/new)
+
+### LEcture 85 - Using Prune to Keep Your Docker System Clean 
+
+* [docker system prune](https://www.youtube.com/watch?v=_4QzP7uwtvI&feature=youtu.be)
+
+### Lecture 86 - What's New In Docker 17.06
+
+* [video](https://www.youtube.com/watch?v=-NeaXUGEK_g)
+* [release notes](https://github.com/docker/docker-ce/releases)
+
+### Lecture 87 - Node.js Good Defaults For Docker
+
+* [project repo](https://github.com/BretFisher/node-docker-good-defaults)
+
+### Lecture 88 - About the DCA (Docker Certificated Associate)
+
+
+* [DCA rationale](https://www.bretfisher.com/docker-certified-associate/)
