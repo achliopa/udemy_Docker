@@ -1307,3 +1307,120 @@ services:
 * we will now start a service with a health check. normally service has 3 states Preparing(download image)=>Starting(execute container and bring it up)=>Running
 * without healthchecks the transition from starting tyo ruinning is fast `docker service create --name p1 postgres`
 * with healthchecks `docker service create --name p2 --health-cmd="pg_isready -U postgres || exit 1" postgres` the state transition is clear
+
+## Section 9 - Container Registries: Image Storage and Distribution
+
+### Lecture 73 - DockerHubL Digging Deeper
+
+* [DockerHub](https://hub.docker.com)
+* an image registry must bew a part of the container plan, a lot of options how to do it
+* dockerhub is the most popular public image registry
+* its a docker registry plus lightweight image building
+* it can connect to github to build the source
+* in dockerhub we have our public or private image repos
+* only 1 private free
+* in my repos i have settings and options. 
+* i can create webhooks so when my images are pushed to dockerhub i can trigger other tools like jenkins, travis CI etc. webhooks are there to automate CI
+* we can also set organizations
+* if we have github repos we dont need to create svs repos in dockerhub or push to dockerhub. we need to Create-> Create autobuild
+* this allows docker to create a CI path to auto build the image based on code commits
+* once we set automated build we get a whole set of new options
+* if we use in our image builds other images the in the build settings we need to add repository links to the dockerhub repos so when they change it triggers a build in our image
+* we can also set BUILD triggers to a 3rd tool (JEnkins CI) to trigger their process
+
+### Lecture 74 - Docker Store: What is it for?
+
+* [DockerStore](https://store.docker.com)
+* 2016 
+* Docker editions are here to dowload
+* also certified Docker/Swarm plugins and commercial certified images (e.g miicrosoft sw)
+* images certified by the creators
+* dockerstore is the app store of docker, sodckerhub is the github
+
+### Lecture 75: Docker Cloud: CI/CO and Server Ops
+
+* [DockerCloud](https://cloud.docker.com)
+* defunct at 2018
+* web based swarm creation/management
+* use popular cloud hosters and bring your own server
+* auto image building testing and deployment
+* more advances than what th ehub does for free
+* set auto builds
+* add vulnerability graph in image by linking to US CERT stadard
+* Easy remote swarm management from local machine to remote swarms, no ssh commands, give people access 
+* Docker EE gives a complete RBAC solution this is discontinued
+
+### Lecture 77 - Understanding Docker Registry
+
+* [Registry Config](https://docs.docker.com/registry/configuration/)
+* [Registry Garbage Collection](https://docs.docker.com/registry/garbage-collection/)
+* [DockerHub Mirror](https://docs.docker.com/registry/recipes/mirror/)
+
+* a private image registry for our network
+* part of the docker/distribution github repo
+* v2 registry is written in go, use it from dockerhub
+* it is the defacto backend registry for storing our containers locally and privately
+* not full featured as Hub or others no web UI, basic auth only
+* not role based auth control. apache htaccess
+* good for small teams without a tool on top of it to make is scallable.
+* at its core a WEB API and storage system, written in GO
+* storage supports local, S3/Azure, Libaba, GCloud OpenStack Swift
+* look in rewsources how to secure registry with TLS
+* storage cleanup via garbage collection
+* enable HUb (dockerhub) caching via *--registry-mirror* so that images are avaliable locally to limit bamnndwidth consumption. registry operates in proxy mode , tell docker deamons to use the proxy
+
+### Lecture 78 - Run a Private Docker Registry
+
+* registry is an http server that runs on port 5000 by default
+* we will retag an existing dockhub image and push it to our new registry
+* we will remove the new image from the cache and pull it from the registry
+* then we will recreate registry with bind mount and see how it stores data
+* by default docker will not talk to any registry unless its running proper HTTPS security, trusted, encrypted "Secure by Default"
+* it will not talk to a registry without HTTPS unless it runs on loicalhost (127.0.0.0/8)
+* for remote selfsigned TLS enable "insecure-registry" in engine
+* we run the registry as docker container `docker container run -d -p 5000:5000 --name registry registry`
+* for registry images nust be taged with host
+* i pull a simple image for testing `docker pull hello-world` from dochub to the localcache. 
+* to send it from the local cache to the registry i tag it `docker tag hello-world 127.0.0.1:5000/hello-world` seting as user the registry port on localhost. this is like making my own official image at the root of the registry. the image is still in local cache but named ina way to be pushed to tregistry
+* if i ls images i see both images in localcache and registry haver same image id
+* i push the taged image `docker push 127.0.0.1:5000/hello-world`. it gets pushed not to dockerhub but to the local registry. 
+* i remove both images from local cache and pull from registry with `docker pull 127.0.0.1:5000/hello-world`
+* we need a volume for registry. if i kill its container and remove it then rerun it and try to pull there is no image as i didint have a persistent volume
+* i remove and kill it and run again adding a volume `docker container run -d -p 5000:5000 --name registry -v $(pwd)/registry-data:/var/lib/registry registry`
+* now if i push image from cache to registry the respawn the container remove the image from cache and pull it back from registry its there in the volume, i run the tree command in the registry-data folder to see the structure of the registry
+
+### Lecture 79 - Assignment: Secure Docker Registry With TLS and Authentication
+
+* The default registry install is rather bare bones, and is open by default, meaning anyone can push and pull images.  You'll likely want to at least add TLS to it so you can work with it easily via HTTPS, and then also add some basic authentication.  
+
+These aren't actually that hard to setup, but do require some commands.  You can learn the basics by creating a self-signed certificate for HTTPS, and then enabling htpasswd  auth, which you'll add users too with basic cli commands.
+
+For this assignment you'll use Play With Docker, a great resource for web-based docker testing and also has a library of labs built by Docker Captains and others, and supported by Docker Inc. 
+
+I'd like you to do the Part 2 and 3 of "Docker Registry for Linux" for this assignment. You can use their text to do this assignment on your own machine, or jump back to their Part 1 and run the container on their infrastructure  using their web-based interface to a real docker engine and learn how "PWD" works!
+
+For more extra credit labs, look through their growing list: http://training.play-with-docker.com/
+
+### Lecture 80 -  Private Docker Registry with Swarm
+
+* works the same way as in localhost
+* because of routing mesh all nodes can see the 127.0.0.1:5000
+* remember to decide how to store images (volume driver)
+* we will test on a swarm in paly-with-docker (wrench option 5 mangers swarm)
+
+```
+docker node ls
+docker service create --name registry --publish 5000:5000 registry
+docker service ps registry
+```
+
+* test the registry in browser visiting port https://xxxxx:500/v2/_catalog and get an empty json array of repositories
+
+```
+docker pull hello-world
+docker tag hello-world 127.0.0.1:5000/hello-world
+docker push 127.0.0.1:5000/hello-world
+```
+
+* re test in browser and see the repo
+* we can now start a service using the image from the registry 27.0.0.1:5000/hello-world
