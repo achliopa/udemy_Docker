@@ -1160,3 +1160,70 @@ docker stack deploy -c docker-compose.yml myapp
 ```
 
 * test in browser enter drupal set posgres credential (dont forget the hostname myapp_postgres) and it works!!!!!!
+
+## Section 8 - Swarm App Lifecycle
+
+### Lecture 69 - Using Secrets with Local Docker Compose
+
+* back in the localmachine we check *secrets-sample-2* folder
+* localhost is not a swarm node. we check that with `sudo docker node ls`
+* we do `docker-compose up -d` to run the containers
+* we run `sudo docker-compose exec psql cat /run/secrets/psql_user
+` to add the secret in the container
+* its not actually a secret but is used as in local dev. what it does is it bindmounts the secret from host to the container fs to be used as env param
+* this works in docker-compose v11 and only with file based secrets not external
+
+### Lecture 70 - Full App Lifecycle: Dev, Build and Deploy With a Single Compose Design
+
+* [multiple compose files](https://docs.docker.com/compose/extends/#multiple-compose-files)
+* [compose file in prod](https://docs.docker.com/compose/production/)
+* as our apps grow we end up with multiple compose files. our goal is to have a single set for dev and prod. and then use them with: 
+	* local `docker-compose up` for dev environment
+	* remote `docker-compose up` for CI environment
+	* remote `docker stack deploy` for prod environment
+* we test this flow in *swarm-stack-3* folder where we have 3 compose files for each environment amd a dockerfile for a custom drupal build
+* first we have the *docker-compose.yml* with all the presets.this will be used in all the environments
+* then we have the *docker-compose.override.yml* that docker will use when i use the command `docker-compose up` the rules are to eaw local development. this will override all settings in barebone docker-compose file. so we use the custom bild from simple file and we add up secrets (file based) port, bind mounts all for local dev
+* .por.yml and .test.yml are to be used in production and testing env respectively. override is picked by docker-compose by default. for the .test.yml i have to specify in the docker-compose command with the -f flag manually so that it is used
+* for .prod.yml as in prod i dont have docker-compose available i have to previously combine the files into a single one with docker-compose config command
+* the .test. is meant to be used in a ci tool like jenkins. iam giving test sttings, ports, secrets but dont care for persisting data as int esting i run from 0 every time for repeatabilit and all gets wiped out after test completes. we see that sample-data are being mount from local fs to container for testing.
+* for .prod. things get serioous as we implement our production concerns.
+* i run `docker-compose up -d` on my deb machine. it will use the barebone file and then overrlay the override. i inspect the container and i see that it worked as all the mounts set in the override are there. we stop all with `docker-compose down`
+* for ci on our test server we have to make sure that docker-compose is available. then in our build steps in the ci tools we must add a shell script `docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d`
+* for production i run the `docker-compose -f docker-compose.yml -f docker-compose.prod.yml config > output.yml`. this will bind both files into a single one (output.yml)  to be used in prod stack. this command should run in our ci solution as a build step
+* this is very cut-edge stuff so we need to check the outputs for com,peteness. extends: does not work yet on stacks and secrets and not added with config. (it seems to work in 2018)
+
+### Lecture 71 - Service Updates: Changing Things in Flight
+
+* [service update command](https://docs.docker.com/engine/reference/commandline/service_update/)
+* service updates provide a rolling replacement pattern of the tasts/containers/replicas in a service
+* it limits downtime NOT prevents downtime. 0 downtime only gets verified with testing. simple apps might claim it. but dbs and websockets are tricky stuff. 
+* in most cases service updates will wipe out and replace containers if its not for very simple changes (metadata, labels and stuff)
+* there are 77 cli options to control the update. many off them have -add and -rm as they are used in multitude and we need to spec which ones we add or remove
+* service aupdate includes rollback and healthcheck options
+* scale and rollback subcommands are available for fast access `docker service scale <servicename>=4` `docker service rollback <servicename>
+* a stack deploy on an existing stack will invoke service updates
+* a common pattern is to update the image used to a newer version `docker service update --image <imagename>:<new tag> <servicename>`
+* an other example is to add an environment var and remove a port `docker service update --env-add NODE_ENV=production --publish-rm 8080`
+* we can scale muliple services at once `docker service scale <service1>=8 <service2>=6`
+* we test the concept by creating a service in anode `docker service create -p 8088:80 --name web nginx:1.13.7` we scel it up with `docker service scale web=5`
+* we run an update changing the image useed `docker service update --image nginx:1.13.6 web` it updates one b one
+* to change ports we cannot just publish on top. we have to  remove the old ones and add the new ones. `docker service update --publish-rm 8080:80 --publish-add 9090:80 web`
+* often we have a problem called rebalancing. when tasks are not evened out on nodes. bu doing a service update without specifing any change docker will redistribute the tasks on nodes balancing things. we do this with --force flag. `docker service update --force web`
+* we clean up `docker service rm web`
+
+### Lecture 72 - Healthchecks in Dockerfiles
+
+* [laravel defaults](https://github.com/BretFisher/php-docker-good-defaults)
+* [HEALTHCHECK Dockerfile](https://docs.docker.com/engine/reference/builder/#healthcheck)
+* [healthcheck compose file](https://docs.docker.com/compose/compose-file/#healthcheck)
+* HEALTHCHECKS were added in v1.12 as part of swarm toolkit.
+is supported in Dockerfile, Compose YAML, docker run, swarm services
+* highly recommended in production.
+* docker engine will exec the command in the containers (e.g. curl localhost) it works even on the virtual network
+* it expects exit 0 (OK) or exit 1 (Error)
+* in docker we need exit 1 for error
+* default container states are (starting, healthy or unhealthy) if its unhealthy it will retry every 30sec. all this is configurable
+* better than just checking that it runs. it can combined with an assertion network in code
+* not AN EXTERNAL MONITORING REPLACEMENT
+* Healthcheck status shows up in `docker container ls`
