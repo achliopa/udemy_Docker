@@ -1503,3 +1503,70 @@ We go straght to Section 6 according to Teachers Recommendation as 5 first chapt
 ### Lecture 22 - Service Constrains
 
 * [constrains in compose file](https://docs.docker.com/compose/compose-file/#placement)
+* can filter task placement based on built-in or custom labels
+* can be  added at service create time ot add/removed at update time
+* this is a HARD REQUIREMNT. placement of tasks fails if not matched, they wont get deployes. the service will be in pending state forever
+* supports multiple contrains to the same service. this is how large swarms with diverse infrastructure  are created an still be manageable with many services distributed to many places
+* supports either a <key> (exists?) or a <key>=<value> pair. a key can be a node metadata (docker node inspect <node>))
+* key value operator can be == or !=
+* Labels can custom or built-in be node.labels or engine.labels
+	* node.labels only added via manager to raft log (stored in raft db)
+	* engine.labels added in *daemon.json* to any node *{"labels":["dmz=true"]}* (we go in docker engine config and create engine labels there). harder to set. we need to restart the docker deamon after setting engine labels.
+	* default to using node.labels, use engine/labels for autoscaling hardware, os
+* node labels are preferable and easier unless we dont have permissions on a swarm manager (node label command in as swarm command and swarm commands are available in manager nodes only)
+* if we are autoscaling our hw in aws and we want labels ofr a specific node (eg a DMZ label) then it might be easier to put it in the engine config because we can do automation with that easily  when we set instances in the cloud
+* nod elabels are great for admins inserting them and settng key parameters about specific infrastructure
+* example: place service only on a mabager node (2 options for same result)
+
+```
+docker service create --constraint=node.role==manager nginx
+docker service create --constraint=node.role!=worker nginx
+```
+
+* role node label (or key) is built in. built in labels start with node.<label>. custom labels start with node.labels.<label> 
+* example: add label to node2 for dmz=true, and constrain to it
+
+```
+docker node update --label-add=dmz=true node2
+docker service create --constraint=node.labels.dmz==true nginx
+```
+
+* the way to add/remove labels to a node is by updating it followed by the option --label-add/rm=<label or key>=<value>
+* we test the commands on node1 of our swarm monitoring the effects on the visualizer. we run `docker service create --name app1 --constraint=node.role==worker nginx`
+* we will change the service placement with a service aupdate adding a new constraint and removing the old one. we cannot change existing constraints. only add and remove `docker service update --constraint-rm node.role==worker --constraint-add node.role==manager app1`
+* like constraits also in node roles we can only add and remove roles when updating the node `docker node update --label-add dmz=true node2`
+* i create a nginx service that has to runonly on a dmz node (e.g reverce proxy) `docker service create --name dmz-nginx --constraint node.labels.dmz==true --replicas 2 nginx`
+* we see a stack file with service constrains in it
+
+```
+version: "3.1"
+services:
+	db:
+		image: mysql:5.7
+		deploy:
+			placement:
+				constraints:
+					- node.labels.dick == ssd
+```
+
+* Node built-in labels:
+	* node.id (listed in docker node ls)
+	* node.hostname (listed in docker node ls)
+	* node.ip (e.g 172.19.17.0/24)
+	* node.role (manager|worker)
+	* node.platform.os (linux|windows|etc)
+	* node.platform.arch(x86_64|arm64|386|etc)
+	* node.labels (empty by default)
+	* Maybe some more not well documented
+
+### Lecture 23 - Service Mode
+
+* we can see it in `docker service ls` output (replicated)
+* there is another mode (global) which is the opposite from replicated. it means one task per node (for that service)
+* Replicated is the default in service create unless otherwose specified. both if we specify anything we get replicate dmode with 1 replica and if we specify replicas number we get replicated mode with multiple replicas spread accross the nodes.
+* with global mode we cannot specify replicas but what happends is that the orchestrator will put one task on every node for this service
+* we can set the service mod on CREATE TIME not on UPDATE TIME we need to remove service and recreate it to change
+* GLobal is good  option for host agents (security , monitoring, backup, proxy etc). it replaces the pre-container concept of an agent that runs on every system
+* from 1.13+ Global Mode can be combined with constraints
+* example1: place one task on each node in swarm `docker service create --mode=global --name test1 nginx`
+* example2: place one task on each worker node in swarm `docker service create --mode=global --constraint=node.role==worker nginx`
