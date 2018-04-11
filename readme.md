@@ -1,5 +1,6 @@
 # Udemy Course: Docker Mastery. The Complete Toolset From a Docker Captain
-[Course](https://www.udemy.com/docker-mastery/learn/v4/overview)
+
+[docker course](https://www.udemy.com/docker-mastery/learn/v4/overview)
 [Github Repo](https://github.com/bretfisher/udemy-docker-mastery)
 
 ## Section 1 - Course Intro and DDocker Setup
@@ -1468,3 +1469,37 @@ docker push 127.0.0.1:5000/hello-world
 
 
 * [DCA rationale](https://www.bretfisher.com/docker-certified-associate/)
+
+--------------------------------------------------------------------------------
+
+# Udemy Course: Docker Swarm Mastery: DevOps Style Cluster orchestration
+[docker swarm course](https://www.udemy.com/docker-swarm-mastery/learn/v4/overview)
+[Github Repo](https://github.com/bretfisher/udemy-docker-mastery)
+
+As this course complements the Docker Mastery course we use the same transcript.
+We go straght to Section 6 according to Teachers Recommendation as 5 first chapters are the same.
+
+## Section 6 - Controlling Container Palcement in Swarm
+
+* in this section we will talk on how to control task palcement ina swarm
+* we need a swarm of 3 nodes (1 manager and 2 workers)
+* we have done this on Lecure 58
+* we need the swarm visualizer service. we modify the stack script of lecture 63 leaving only visualizer service and deploy it in node1
+
+### Lecture 21 - 5 Ways to Control Container Placement
+
+* we will now see how containers get placed through the orchestrator, this engine that makes sure that the replicas we requested run as tasks on the nodes we want them
+* By default a Swarm Service spreads its tasks out over Nodes
+	* tries to use the least used node for a task
+* Swarm has multiple ways to control which node a container runs on
+* These options can be used together for complex requirements
+* there are 5 ways to control container placement
+	* 1. Use node labels and Service Contrains (<key>=<value>). Its a combination of features that uses metadata on nodes. When we create a service we apply a contraint to it saying it has to have a specific label to run that service task
+	* 2. Service Modes (replicated|global). we ve seen these modes in the console output od docker service ls command (always we got replicated never global)
+	* 3. (new in 17.04+) Placement Preferences (spread). this is a soft requirement. if the orchestrator cannot fulfill it it will go and create the task somewere not according to our preference. these preferences are good to spread accross racks or datacenters or availability zones.
+	* 4. Node Availability (active|passive|drain). we can control on a node by node level, whether it is even available for new tasks to be scheduled on it
+	* 5. Resource Requirements. We can tell a service that it needs a certain amount of CPU or memory and the scheduler that whatever nbode we are putting the container to has the specified resources avaliable. if not it will not shedule it there
+
+### Lecture 22 - Service Constrains
+
+* [constrains in compose file](https://docs.docker.com/compose/compose-file/#placement)
