@@ -12,21 +12,12 @@ services:
             - frontend
     db:
         image: postgres:9.6
-        deploy:
-            placement:
-                constraints:
-                    - node.labels.ssd==true
         volumes:
             - db-data:/var/lib/postgresql/data
         networks:
             - backend
     vote:
         image: bretfisher/examplevotingapp_vote
-        deploy:
-            replicas: 2
-            placement:
-                constraints:
-                    - node.role!=manager
         ports:
             - '5000:80'
         networks:
@@ -39,15 +30,9 @@ services:
             - backend
     worker:
         image: bretfisher/examplevotingapp_worker:java
-        deploy:
-            mode: global
-            placement:
-                constraints:
-                    - node.role!=manager
         networks:
             - frontend
             - backend
-
 networks:
     frontend: null
     backend: null

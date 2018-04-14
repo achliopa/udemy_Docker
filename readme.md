@@ -1528,8 +1528,7 @@ docker service create --constraint=node.role!=worker nginx
 
 ```
 docker node update --label-add=dmz=true node2
-docker service create --constraint=node.labels.dmz==true nginx
-```
+   ```
 
 * the way to add/remove labels to a node is by updating it followed by the option --label-add/rm=<label or key>=<value>
 * we test the commands on node1 of our swarm monitoring the effects on the visualizer. we run `docker service create --name app1 --constraint=node.role==worker nginx`
@@ -1546,7 +1545,7 @@ services:
 		deploy:
 			placement:
 				constraints:
-					- node.labels.dick == ssd
+					- node.labels.disk == ssd
 ```
 
 * Node built-in labels:
@@ -1569,4 +1568,499 @@ services:
 * GLobal is good  option for host agents (security , monitoring, backup, proxy etc). it replaces the pre-container concept of an agent that runs on every system
 * from 1.13+ Global Mode can be combined with constraints
 * example1: place one task on each node in swarm `docker service create --mode=global --name test1 nginx`
-* example2: place one task on each worker node in swarm `docker service create --mode=global --constraint=node.role==worker nginx`
+* example2: place one task on each worker node in swarm `docker service create --name test2 --mode=global --constraint=node.role==worker nginx`
+* this is handy if we have vm creation automation
+* if we want to add service  mode conststrains in stack file:
+
+```
+version: "3.1"
+services:
+	web:
+		image: nginx
+		deploy:
+			mode: global
+```
+
+### Lecture 24 - Service placement preference
+
+* it is a 17.04+ feature for a best effor 'soft req'
+* if it sont met container is placed somewhere elese and runs
+* only one strategy for now. "spread"
+	* spreads tasks among all values of a label
+	* good to ensure distribution across avaialbility zones (aws) , datacenters, racks, subnets etc.
+* so with spread when we pick a label the orchestrator will try to distribute tasks among all values of this label. if we want to spread workload among different types of infrastracture
+* works in serivece create and update
+* can add multiple preferences for multi-layer placement control
+* wont move service tasks if labels change
+* use with Constraints if labels arent on all nodes
+	* missing label is same as having the label with a null value (so are included in spread?)
+* example: label all your AWS nodes with availability zone (like a datacenter in same city)
+
+```
+docker node update --label-add=azone=1 nodeX
+docker node update --label-add=azone=2 nodeY
+docker node update --label-add=azone=3 nodeZ
+```
+
+* example cont: make sure our service is deployed to all availability zones
+
+```
+docker service create --placement-pref=spread=node.labels.azone --replicas 3 nginx
+```
+
+* use service update to add/remove preferences
+
+```
+--placement-pref-add spread=node.labels.subnet
+--placement-pref-rm spread=node.labels.subnet
+```
+
+* multi-layer preferences [docs](https://docs.docker.com/engine/swarm/services/#placement-preferences) supports more granularity by nesting preferences
+
+```
+docker service create \
+  --replicas 9 \
+  --name redis_2 \
+  --placement-pref 'spread=node.labels.datacenter' \
+  --placement-pref 'spread=node.labels.rack' \
+  redis:3.0.6
+```
+
+* we test task placement preferences
+
+```
+docker node update --label-add=azone=1 node1
+docker node update --label-add=azone=2 node2
+docker node update --label-add=azone=3 node3
+docker service create --placement-pref=spread=node.labels.azone --replicas 2 --name webapp1 nginx
+docker service create --placement-pref=spread=node.labels.azone --replicas 2 --name webapp2 nginx
+docker service update --placement-pref-rm spread=node.labels.azone webapp1
+docker service scale webapp2=8
+```
+
+* we see the tasks spreading accross the zones putiing the first in node1 and preading
+* we will try to break the pacement preference soft requirement by adding a worker node constraint for the webapp. we see that constraint overrides preference
+
+```
+docker service update --constraint-add node.role==worker webapp2
+```
+
+* placement preference in stack files
+
+```
+version: "3.1"
+services:
+	web:
+		image: nginx
+		deploy:
+			placement:
+				preferences:
+					spread: node.labels.azone
+```
+
+### Lecture 25 - Node Availability
+
+* each node can have one of three admin-controller states
+* only affects if exiting or new containers can run on that node (nothing to do wwith networks, volumes)
+* Availability States:
+	* active: runs existing tasks, available for new tasks (default)
+	* pause: runs existing tasks, NOT available for new tasks (good for troubleshooting)
+	* drain: reschedules existing tasks, not avaialble for new tasks (good for maintenance)
+* These options affects service updates and recovering tasks too.
+* Internet examples include 'drain managers', but not realistic (suggest to drain managers to run only manually palced tasks and not regular workload)
+	* use labels to control manager tasks (run swarm management tasks like Portainer)
+
+* example: prevent node 2 from starting new containers, drain node 3
+
+```
+docker node update --availability pause node2
+docker node upadate --availability drain node3
+```
+
+* swarm does not auto rebalance workload.
+* easiest way to fully rebalance is to update a service in a minor way like adda container label
+
+### Lecture 26 - Service Resource Requirements
+
+* [compose file resources](https://docs.docker.com/compose/compose-file/#resources)
+* [risk of running out of memory](https://docs.docker.com/config/containers/resource_constraints/)
+* docker run has many options, service create has different options
+* resourse reqs are set in service rcreate/update, but are controlled per container/task
+* set for CPU and memory, reserving and limiting
+* is the maximum of resources given to a container
+	* --limit-cpu .5 (whatever OS sees as CPU)
+	* --limit-memory 256M
+* beware of OOME (with or without limits)
+* if we run a db and it grows over time indexes grow and needs more mmeory. if it hits the limit container will be killed and rescheduled, bad for dbs
+* test with real data
+* the other option is reservations. more common when we ddeal with our own resources on our servers (we make sure they have the resources they need). they are not looking at realtime on our container. they are pure entries in a raft db
+* Minimum free resources needed to chedule container (swarm keeps track)
+	* --reserve-cpu .5
+	* --reserve-memory 256M
+* if services reserve resources even if they dont use them other services cannot be reserved on the machines. not at OS level. it just makes sure resources will be there when you need them.
+
+* example1: reserve cpu and memory 
+
+```
+docker service create --reserve-memory 800M --reserve-cpu 1 mysql (all CPU resources)
+```
+
+* example2: limit cpu and memory
+
+```
+docker service create --limit-memory 150M --limit-cpu .25 nginx
+```
+
+* service update is the same
+* remove the limits with update them to 0 
+
+```
+docker service update --limit-memory 0 --limit-cpu 0 myservice
+```
+
+* stack file example
+
+```
+version: "3.1"
+services:
+	database:
+		image: mysql
+		deploy:
+			resources:
+			limits:
+				cpus:'1'
+				memory: 1G
+			reservations:
+				cpus: '0.5'
+				memory: 500M
+```
+
+* limts are in deply area so work in the stack file. for compose files we use it differently
+* we test resource constraints by a service in swarm. we exhast resources with reservation to prevent ttast assignement on an node
+
+```
+docker service create --reserve-memory 800M --name 800 nginx
+docker service create --replicas 4 --reserve-memory 300M --name 300 nginx
+docker service update --reserve-memory 0 800
+docker service create --reserve-cpu 8 --name 8 nginx (reserve 8 cpu cores ) => error dont have any, not even scheduel the task
+```
+
+* limit the the meory on a stress tools to force a memory outage and see the error
+
+```
+docker service create --limit-memory 100M --name 100 bretfisher/stress:256m
+```
+
+* caanot run the tasks -> task failure -> try to reschedule -> error (no 8 core machine n my swarm)
+
+### Assignment: Control Container Placement
+
+* Customize a Multi-Service Stack File to Control Container Placement in a Swarm (swarm-stack-4)
+* edit the ./swarm-stack-4/voting-app-placement.yml
+* changes needed:
+	* *db* must only run on a node with *ssd=true* label
+	* *vote* should be HA with 2 replicas
+	* *vote* must not run on Swarm manager nodes
+	* *worker* needs to scale with Swarm worker nodes, 1 task each
+* before seploying stack:
+		* add tag *ssd=true* to node1
+* verify the deployment matches ./swarm-stack-4/deployment.jpg
+
+* solution
+
+```
+docker node update --label-add=ssd=true node1
+```
+
+```
+version: '3'
+services:
+    redis:
+        image: redis:alpine
+        networks:
+            - frontend
+    db:
+        image: postgres:9.6
+        deploy:
+            placement:
+                constraints:
+                    - node.labels.ssd==true
+        volumes:
+            - db-data:/var/lib/postgresql/data
+        networks:
+            - backend
+    vote:
+        image: bretfisher/examplevotingapp_vote
+        deploy:
+            replicas: 2
+            placement:
+                constraints:
+                    - node.role!=manager
+        ports:
+            - '5000:80'
+        networks:
+            - frontend
+    result:
+        image: bretfisher/examplevotingapp_result
+        ports:
+            - '5001:80'
+        networks:
+            - backend
+    worker:
+        image: bretfisher/examplevotingapp_worker:java
+        deploy:
+            mode: global
+            placement:
+                constraints:
+                    - node.role!=manager
+        networks:
+            - frontend
+            - backend
+
+networks:
+    frontend: null
+    backend: null
+volumes:
+    db-data: null
+```
+
+```
+docker stack deploy -c example-voting-app-stack.yml vote
+```
+
+### Lecture 27: Section Review
+
+* 1. Node labels & Service Constrains
+	* Hard requirement. Only schedules tasks if swarm matches requirement
+	* Add labels to nodes first, based on location, hw or purpose
+	* Then Use constraints when creating services
+* 2. Service Modes RTeplicated (--replicas) or Global (one per node)
+	* Global is good for monitoring/logging/proxy/security tools (reverse proxy=layer7 loadbalancer on worker nodes)
+	* Only set at srvice create time
+* 3. 17.04+ Placement Preferences
+	* Soft Requirement. For now only used  to spread across availability zones
+* 4 node Availability
+	* three options: active, pause or drain
+* 5 Resource Requirements
+	* `--reserve-cpu --reserve-memory` for mi, `--limit-cpu --limit-memory` for max
+	
+## Section 7 - Operating Docker Swarm In Production
+
+### Lecture 28 - Service Logs: When to Use them and their Limits
+
+* new feat for swarm. previously the only logging available was `docker container logs`. service logs is the same but aggregates all service tasks logs
+* can return all taks at once, or just one task's logs (by specifying task id). all from manager node
+* great for real-time cli troubleshooting, especially for small swarms without a 3rd party logging system.
+* has options for follow/tail, and other basic common log options
+* not for log storage, or searching or feeding into other systems
+* does not work if you use --log-driver for sending logs off server
+* works with docker json file or linux jorald
+* only use for small swarms and testing
+* Prod: AWS + Cloudwatch
+* How to return all logs for a service: `docker service logs <service/id>`
+* return all logs for a single task: `docker service logs <taskid>`
+* return unformatted logs with no trunking `docker  service logs --raw --no-trunc <servicename/id>` .no trunc  means wrap in end
+* only return last 50 log entries and all future logs `docker service logs -tail 50 --follow <servicename/id>`
+* example on our swarm
+
+```
+# at node1
+cd swarm-stack-5
+docker stack deploy -c example-voting-app-stack.yml vote
+```
+
+* we use a ready script to generate some logs
+
+```
+cat generate-some-votes.sh
+
+```
+* ab stands for apache bench a useful tool for testing servers (generate events)
+* we will generate the votes in the vote service container with exec
+
+```
+# find the vote container on node1
+docker ps
+docker exec $(docker ps --filter name=vote_vote -q) ./generate-some-votes.sh
+```
+
+* 3000 vites are cast. we see the logs now
+	
+```
+docker service logs vote_worker
+```
+
+* we search per task id
+
+```
+docker service ps vote_worker
+docker service logs su09rweyw461
+```
+
+i grep the logs
+
+```
+docker service logs su09rweyw461 | grep 98372e7bc31ac2ca # dont work
+docker service logs su09rweyw461  2>&1 | grep 98372e7bc31ac2ca # works (combine error and out logsin one)
+``` 
+
+### Lecture 29 - Docker Events and Viewing them in Swarm
+
+* Docker Events is not quite an events log. is more of an "actions taken" logs of docker engine and swarm. (e.g. network create, service update,  container start). the output is to be consumed by an api.
+* docker events  received SwarmKit events in 17.06 (services/nodes/secrets/configs got create/update/remove)
+* daemon logs running in docker -d to the jurnal of linux, low level log service-os or fs (different than docker events)
+* docker events has searching (filtering) and formatting (we can search it)
+* limited to last 1000 events (no log are oted on disk)
+* two scopes (local or swarm)
+* in a swarm scope: swarm events on swarm manager (not much) swarm orchestrator and s swarm scheduler events. once things are started the dont appear in swarm scope but in local scope
+* not the same as dockerd (journald) log, also not an error log
+
+* how to follow future events :  `docker events` (real time stream). if we insert this command in a worker we will see local events. in a mager? swarm events
+
+* how to return events froma date untill now and future (date based search)
+
+```
+docker events --since 2017-12-01
+docker events --since 2017-12-01T12:30:00 # lots of date formats avaiable
+
+```                                                                                
+
+* how to return events from 30m ago untill now and future
+
+```
+docker events --since 30m
+docker events --since 2h10m
+
+```
+
+* how to return last hour of events filtered by event name
+
+```
+docker events --since 1h --filter event=start
+```
+
+* how to only return Swarm related events for networks (stack multiple filters). if i use multiple fitlers withthe same key they are ORed. if the keys are different theya re ANDed.
+
+```
+docker events --since 1h --filter scope=swarm -filter type=network
+```
+
+* example in swarm node (we stop visualizer by scaling to 0)
+
+```
+docker service scale voteapp_visualizer=0
+```
+
+* i start docker events stream in all nodes `docker events`
+
+* i trigger events with servie create/delete. the last command tries to be scheduled in all noes in rotation withno success
+
+```
+docker service create --name nginx nginx
+docker service rm nginx
+docker  service create --limit-memory=100M --name 100 bretfisher/stress:256m
+```
+
+* we get container starts dies and oom (out of memory)
+
+### Lecture 30 - Using Swarm Configs to Save Time
+
+* feat apeared in 17.06
+* it allows to store strings or whole files in Swarm Raft DB and then map them to any path in a container.
+* tt is handy when we just have e.g. a mysql db that we need to run a container and the only thing we wan to change on th  emysql is the config before we start it up,or an nginx cont we want to give a proxy config inside in the etc dir for nginx
+* with swarm configs we dont need custom image or bind-mount to host.
+* bind mounts is not optimal in swarms because we have to put files on HDD outside of the task container (portability, availability).
+* we want to put configs from the docker cli in the swarm in a highly available way avaialble to the default images in dockerhub
+* 17.06+ similar to secrets but can go anywhere in a container, in any path  we specify not just in the run directory which is a tempfs (encrypted)
+* configs are immutable, we cannot edit them once created, rotation process is the key
+* they are removable once services are  removed
+* strings  saved to Swarm Raft Log (instant Highly Available). unlike putting a file on the host and bind-mounting it. we have it in the raft log. if a manager goes dow is still available on every system  as  long as we have raft concensus. private keys should not be stored in configs. also environment vars not a good candidate (too small). configs are usualy 100lines or so (too large for Dockerfile)
+* Private Keys should sstill use secrets (RAM disks,enc at rest)
+* how to create a new config file from a nginx config? `docker config create nginx01 ./nginx.conf` (take a .conf file and store it as docker config)
+* how we create a service with a config mapped in `docker service create --config source=nginx01, target=/etc/nginx/conf.d/default.conf` (map it to a target fs location anywhere on the target fs) (likea bind-mount coing rom teh raft)
+* how to create a new config to replace the old? 
+	* 1) create new config `docker config create nginx02 ./nginx.conf` 
+	* 2) update service `docker service update --config-rm nginx01 --config-add source=nginx02,target=/etc/nginx/conf.d/default.conf` (remove old first, add new to same target location)
+	* 3) remove old config `docker config rm nginx01`
+* config example in stack file (like named volumes)
+
+```
+version: "3.3" # 3.3 or higher required
+services:
+	web:
+		image:nginx
+		configs:
+			- source: nginx-proxy
+			target: /etc/nginx/conf.d/default.conf # target location in srvice task fs
+configs:
+	nginx-proxy: # config name
+		file: ./nginx-app.conf # location on host
+```
+
+* cli exercise (swarm-stack-6 direcotory in node1) we have 2 files the stack file and the config file to add.
+* the scenario is e have an app and we want to put a proxy infront to protect it by an  extra layer. the nginx will take all incomig traffic from the internet and  relay it to the backend voting app. by default it exposes prot 5000. we will put a proxy infront
+
+```
+docker stack deploy -c example-voting-app-stack.yml vote
+```
+
+* the nginx-app.conf listens to port 80 and passes it to vote host in virtual network
+
+```
+server {
+
+	listen 80;
+
+	location / {
+
+		proxy_pass         http://vote;
+		proxy_redirect     off;
+		proxy_set_header   Host $host;
+		proxy_set_header   X-Real-IP $remote_addr;
+		proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header   X-Forwarded-Host $server_name;
+
+	}
+}
+
+```
+
+* we add the config in docker (use timespamp for config)
+
+```
+docker config create vote-nginx-20180414 ./nginx-app.conf
+docker config ls
+```
+
+* we create the proxy service in the sam entwork as our stack app (frontend)
+
+```
+docker service create --config source=vote-nginx-20180414,target=/etc/nginx/conf.d/default.conf -p 9000:80 --network vote_frontend --name proxy nginx
+```
+
+* success our app listens on port 9000 and 5000. 9000 acts as reverse proxy
+* we can inspect our docker config with `docker config inspect <configname>`. data is encrypted. it also does not state the service it is attached to. we need to inspect the proxy to see the configs
+
+```
+docker config inspect vote-nginx-20180414 
+```
+
+* if we try to rm the config while service is running we get error.
+* we create a new config ans swap them with service update
+
+```
+docker config create vote-nginx-20180415 ./nginx-app.conf
+docker service update --config-rm vote-nginx-20180414 --config-add source=vote-nginx-20180415,target=/etc/nginx/conf.d/default.conf proxy
+docker config rm vote-nginx-20180414
+```
+
+## Section 8 - Whats next
+
+### Lecture 31 - Options
+
+* Swarm monitoring and alerting w/ Prometheus
+* Docker for  AWS/Azure
+* Multinode SSL certs with LetsEncrypt
+* Logging with the ELK stack and Papertrail
+* Distributed app troubleshooting in Swarm
+* Shared storage with REX-ray plugin on various clouds
